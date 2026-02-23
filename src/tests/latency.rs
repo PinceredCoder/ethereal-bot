@@ -104,3 +104,62 @@ async fn measure_post_only_latency_with_ws() {
         bot.cancel_order(order_id).await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn measure_ioc_latency_with_ws() {
+    let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY required");
+    let config = Config::testnet(private_key);
+    let mut bot = EtherealBot::new(&config).await.unwrap();
+
+    bot.subscribe_order_updates("48119502-2465-45c5-970e-27a28a4e0e3c")
+        .await
+        .unwrap();
+
+    // Цена выше рынка — IOC исполнится немедленно
+    let price_raw: u128 = 100_000 * 1_000_000_000;
+    let qty_raw: u128 = 1_000_000_000 / 10_000; // 0.0001 BTC
+
+    println!(
+        "{:<5} {:<14} {:<14} {:<14} {:<14}",
+        "iter", "status", "rest_rtt", "engine_ms", "ws_rtt"
+    );
+    println!("{}", "-".repeat(65));
+
+    for i in 0..5 {
+        let (order_id, t0) = bot
+            .place_order(price_raw, qty_raw, 0, 1, false, "IOC")
+            .await
+            .unwrap();
+        let rest_rtt = t0.elapsed();
+
+        loop {
+            let msg = bot.next_ws_message().await.unwrap().unwrap();
+            println!("msg: {msg}");
+            if !msg.contains(&order_id.to_string()) {
+                continue;
+            }
+            if let Some(payload) = parse_order_update(&msg) {
+                for update in &payload.data {
+                    if update.id != order_id {
+                        continue;
+                    }
+
+                    if update.status == "FILLED" || update.status == "CANCELED" {
+                        let ws_rtt = t0.elapsed();
+                        let engine_ms = update.updated_at.abs_diff(update.created_at);
+                        println!(
+                            "{:<5} {:<14} {:<14} {:<14} {:<14}",
+                            format!("#{i}"),
+                            update.status,
+                            format!("{rest_rtt:.1?}"),
+                            format!("{engine_ms}ms"),
+                            format!("{ws_rtt:.1?}"),
+                        );
+                        break;
+                    }
+                }
+                break;
+            }
+        }
+    }
+}

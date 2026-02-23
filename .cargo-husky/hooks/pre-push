@@ -1,0 +1,12 @@
+#!/bin/bash
+
+set -e
+
+echo '+cargo sqlx prepare -- --tests'
+while IFS= read -r dir;
+do
+  sh -c 'cd "$(dirname "$1")" && cargo sqlx prepare --check -- --tests' _ "$dir"
+done < <(find . -type d -name .sqlx)
+
+echo '+cargo test --all'
+cargo test --all

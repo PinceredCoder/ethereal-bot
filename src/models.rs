@@ -34,6 +34,7 @@ pub(crate) struct TradeOrderData {
     pub order_type: String,
     pub time_in_force: &'static str,
     pub post_only: bool,
+    pub client_order_id: Uuid,
 }
 
 impl TradeOrderData {
@@ -56,6 +57,7 @@ impl TradeOrderData {
             order_type: "LIMIT".to_string(),
             time_in_force,
             post_only,
+            client_order_id: Uuid::new_v4(),
         }
     }
 }
@@ -122,4 +124,26 @@ impl CancelOrderData {
 pub(crate) struct CancelOrderRequest {
     pub data: CancelOrderData,
     pub signature: String,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrderUpdateData {
+    pub id: Uuid,
+    pub status: String,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub client_order_id: Uuid,
+}
+
+#[derive(Debug, serde::Deserialize)]
+pub struct WsEnvelope {
+    pub data: Vec<OrderUpdateData>,
+}
+
+pub fn parse_order_update(msg: &str) -> Option<WsEnvelope> {
+    // Срезаем "42/v1/stream," и парсим ["OrderUpdate", {...}] как tuple
+    let payload = msg.strip_prefix("42/v1/stream,")?;
+    let (_, envelope): (&str, WsEnvelope) = serde_json::from_str(payload).ok()?;
+    Some(envelope)
 }

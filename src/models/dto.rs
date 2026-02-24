@@ -78,14 +78,14 @@ pub struct CancelOrderData {
     pub subaccount: String,
     pub nonce: String,
     pub order_ids: Vec<Uuid>,
-    pub client_order_ids: Vec<String>,
+    pub client_order_ids: Vec<Uuid>,
 }
 
 impl CancelOrderData {
     pub fn from_cancel_order(
         order: CancelOrder,
         order_ids: Vec<Uuid>,
-        client_order_ids: Vec<String>,
+        client_order_ids: Vec<Uuid>,
     ) -> Self {
         Self {
             sender: format!("{:?}", order.sender),

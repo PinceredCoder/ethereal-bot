@@ -233,7 +233,6 @@ impl EtherealRuntime {
             signature: format!("0x{}", hex::encode(signature.as_bytes())),
         };
 
-        // Регистрируем до отправки
         let (sender, receiver) = oneshot::channel();
         self.pending_orders.insert(client_order_id, sender);
 
@@ -255,10 +254,13 @@ impl EtherealRuntime {
         Ok((client_order_id, t0, receiver))
     }
 
-    pub async fn cancel_order(&mut self, order_id: Uuid) -> Result<(), EtherealRuntimeError> {
+    pub async fn cancel_order(
+        &mut self,
+        client_order_id: Uuid,
+    ) -> Result<(), EtherealRuntimeError> {
         let ts_cancel = Timestamp::now();
         let (cancel_sig, order) = self.signer.sign_cancel_order(ts_cancel.nonce, &self.domain);
-        let cancel_data = CancelOrderData::from_cancel_order(order, vec![order_id], vec![]);
+        let cancel_data = CancelOrderData::from_cancel_order(order, vec![], vec![client_order_id]);
         let cancel_req = CancelOrderRequest {
             data: cancel_data,
             signature: format!("0x{}", hex::encode(cancel_sig.as_bytes())),

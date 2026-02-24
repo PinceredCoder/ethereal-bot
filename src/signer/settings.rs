@@ -1,6 +1,7 @@
 #[derive(serde::Deserialize)]
-
 pub struct Config {
-    pub private_key: String,
-    pub subaccount: String,
+    #[serde(with = "hex::serde")]
+    pub private_key: Vec<u8>,
+    #[serde(with = "hex::serde")]
+    pub subaccount: Vec<u8>,
 }

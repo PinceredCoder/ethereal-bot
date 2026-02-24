@@ -1,3 +1,4 @@
+mod backend;
 mod error;
 mod models;
 mod settings;
@@ -21,7 +22,7 @@ use crate::models::{
     CancelOrderData, CancelOrderRequest, OrderRequest, OrderUpdateData, Timestamp, TradeOrder,
     TradeOrderData,
 };
-use crate::settings::Config;
+use crate::settings::{Config, ExecutionMode};
 
 type WsWriteType = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
@@ -47,6 +48,7 @@ pub struct EtherealBot {
     domain: Eip712Domain,
 
     rest_url: url::Url,
+    execution_mode: ExecutionMode,
 
     ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
     pending_orders: Arc<DashMap<Uuid, oneshot::Sender<(OrderUpdateData, Instant)>>>,
@@ -68,9 +70,10 @@ impl EtherealBot {
 
         Ok(Self {
             signer: crate::signer::Signer::new(&config.signer_config),
-            domain: make_domain(config.chain_id, config.exchange.parse()?),
+            domain: make_domain(config.chain_id, config.exchange),
             http_client: reqwest::Client::new(),
             rest_url: config.rest_url.clone(),
+            execution_mode: config.execution_mode,
             ws_sender,
             pending_orders,
         })
@@ -262,5 +265,9 @@ impl EtherealBot {
             .await?;
 
         Ok(())
+    }
+
+    pub fn execution_mode(&self) -> ExecutionMode {
+        self.execution_mode
     }
 }

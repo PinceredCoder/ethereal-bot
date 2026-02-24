@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use alloy::primitives::{Address, FixedBytes};
 use alloy::signers::SignerSync;
 use alloy::signers::local::PrivateKeySigner;
@@ -19,9 +17,9 @@ pub(crate) struct Signer {
 
 impl Signer {
     pub fn new(config: &Config) -> Self {
-        let inner = PrivateKeySigner::from_str(&config.private_key).unwrap();
+        let inner = PrivateKeySigner::from_slice(&config.private_key).unwrap();
         let address = inner.address();
-        let subaccount = FixedBytes::<32>::from_slice(&hex::decode(&config.subaccount).unwrap());
+        let subaccount = FixedBytes::<32>::from_slice(&config.subaccount);
         Self {
             inner,
             address,

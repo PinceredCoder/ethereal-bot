@@ -1,3 +1,3 @@
 mod config;
 
-pub(crate) use config::Config;
+pub(crate) use config::{Config, ExecutionMode};

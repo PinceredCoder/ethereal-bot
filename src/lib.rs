@@ -18,9 +18,10 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::models::{
-    CancelOrderData, CancelOrderRequest, OrderRequest, OrderUpdateData, Timestamp, TradeOrder,
-    TradeOrderData,
+use crate::models::contracts::TradeOrder;
+use crate::models::dto::{
+    CancelOrderData, CancelOrderRequest, OrderRequest, OrderUpdateData, Timestamp, TradeOrderData,
+    parse_order_update,
 };
 use crate::settings::{Config, ExecutionMode};
 
@@ -147,7 +148,7 @@ impl EtherealBot {
 
                     let received_at = Instant::now();
 
-                    if let Some(payload) = models::parse_order_update(&text) {
+                    if let Some(payload) = parse_order_update(&text) {
                         for update in payload.data {
                             if let Some((_, sender)) =
                                 pending_orders.remove(&update.client_order_id)
@@ -250,7 +251,7 @@ impl EtherealBot {
     }
 
     pub async fn cancel_order(&mut self, order_id: Uuid) -> Result<(), EtherealBotError> {
-        let ts_cancel = crate::models::Timestamp::now();
+        let ts_cancel = Timestamp::now();
         let (cancel_sig, order) = self.signer.sign_cancel_order(ts_cancel.nonce, &self.domain);
         let cancel_data = CancelOrderData::from_cancel_order(order, vec![order_id], vec![]);
         let cancel_req = CancelOrderRequest {

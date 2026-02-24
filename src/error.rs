@@ -12,6 +12,12 @@ pub enum EtherealBotError {
     #[error("invalid address: {0}")]
     InvalidHexAddress(#[from] alloy::hex::FromHexError),
 
+    #[error("request was not sent to exchange: {0}")]
+    RequestNotSent(#[source] reqwest::Error),
+
+    #[error("request delivery is uncertain and may have reached exchange: {0}")]
+    RequestDeliveryUncertain(#[source] reqwest::Error),
+
     #[error(transparent)]
     HttpError(#[from] reqwest::Error),
 

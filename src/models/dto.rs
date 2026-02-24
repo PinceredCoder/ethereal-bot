@@ -1,25 +1,11 @@
 use serde::Serialize;
 use uuid::Uuid;
 
-alloy::sol! {
-    #[derive(Debug)]
-    struct TradeOrder {
-        address sender;
-        bytes32 subaccount;
-        uint128 quantity;
-        uint128 price;
-        bool reduceOnly;
-        uint8 side;
-        uint8 engineType;
-        uint32 productId;
-        uint64 nonce;
-        uint64 signedAt;
-    }
-}
+use super::contracts::{CancelOrder, TradeOrder};
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct TradeOrderData {
+pub struct TradeOrderData {
     pub sender: String,
     pub subaccount: String,
     pub quantity: String,
@@ -62,7 +48,7 @@ impl TradeOrderData {
     }
 }
 
-pub(crate) struct Timestamp {
+pub struct Timestamp {
     pub nonce: u64,
     pub signed_at: u64,
 }
@@ -80,23 +66,14 @@ impl Timestamp {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct OrderRequest {
+pub struct OrderRequest {
     pub data: TradeOrderData,
     pub signature: String,
 }
 
-alloy::sol! {
-    #[derive(Debug)]
-    struct CancelOrder {
-        address sender;
-        bytes32 subaccount;
-        uint64 nonce;
-    }
-}
-
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct CancelOrderData {
+pub struct CancelOrderData {
     pub sender: String,
     pub subaccount: String,
     pub nonce: String,
@@ -121,9 +98,25 @@ impl CancelOrderData {
 }
 
 #[derive(Debug, Serialize)]
-pub(crate) struct CancelOrderRequest {
+pub struct CancelOrderRequest {
     pub data: CancelOrderData,
     pub signature: String,
+}
+
+// TODO(step-3): remove this allowance once backend implementations construct these results.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum SubmitOrderResult {
+    Accepted { payload: serde_json::Value },
+    Rejected { payload: serde_json::Value },
+}
+
+// TODO(step-3): remove this allowance once backend implementations construct these results.
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub enum CancelOrderResult {
+    Accepted { payload: serde_json::Value },
+    Rejected { payload: serde_json::Value },
 }
 
 #[derive(Debug, serde::Deserialize)]
@@ -142,7 +135,6 @@ pub struct WsEnvelope {
 }
 
 pub fn parse_order_update(msg: &str) -> Option<WsEnvelope> {
-    // Срезаем "42/v1/stream," и парсим ["OrderUpdate", {...}] как tuple
     let payload = msg.strip_prefix("42/v1/stream,")?;
     let (_, envelope): (&str, WsEnvelope) = serde_json::from_str(payload).ok()?;
     Some(envelope)

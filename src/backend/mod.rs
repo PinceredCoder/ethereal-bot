@@ -2,7 +2,7 @@ use std::future::Future;
 use std::pin::Pin;
 
 use crate::error::EtherealBotError;
-use crate::models::{CancelOrderRequest, OrderRequest};
+use crate::models::dto::{CancelOrderRequest, CancelOrderResult, OrderRequest, SubmitOrderResult};
 use crate::settings::ExecutionMode;
 
 // TODO(step-3): remove this allowance once OrderBackend is wired into EtherealBot.
@@ -18,7 +18,10 @@ pub(crate) trait OrderBackend: Send + Sync {
     fn submit_order<'a>(
         &'a self,
         request: &'a OrderRequest,
-    ) -> BackendFuture<'a, serde_json::Value>;
+    ) -> BackendFuture<'a, SubmitOrderResult>;
 
-    fn cancel_order<'a>(&'a self, request: &'a CancelOrderRequest) -> BackendFuture<'a, ()>;
+    fn cancel_order<'a>(
+        &'a self,
+        request: &'a CancelOrderRequest,
+    ) -> BackendFuture<'a, CancelOrderResult>;
 }

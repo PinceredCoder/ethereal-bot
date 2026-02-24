@@ -7,7 +7,7 @@ mod settings;
 use alloy_sol_types::Eip712Domain;
 pub(crate) use settings::Config;
 
-use crate::models::{CancelOrder, TradeOrder};
+use crate::models::contracts::{CancelOrder, TradeOrder};
 
 pub(crate) struct Signer {
     pub inner: PrivateKeySigner,

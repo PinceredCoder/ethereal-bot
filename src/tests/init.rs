@@ -37,7 +37,6 @@ async fn wrap_usde() {
 
     let (provider, _address) = setup().await;
 
-    // Врапаем только 10 USDe для теста
     let amount = U256::from(10u128) * decimals;
 
     let wusde = IWUSDE::new(TOKEN, &provider);

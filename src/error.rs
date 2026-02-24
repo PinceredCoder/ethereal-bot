@@ -1,5 +1,5 @@
 #[derive(Debug, thiserror::Error)]
-pub enum EtherealBotError {
+pub enum EtherealRuntimeError {
     #[error("invalid url: {0}")]
     InvalidUrl(#[from] url::ParseError),
 
@@ -21,6 +21,12 @@ pub enum EtherealBotError {
     #[error(transparent)]
     HttpError(#[from] reqwest::Error),
 
-    #[error("exchange API error: {0}")]
-    Api(String),
+    #[error("execution mode `{0}` is not implemented yet")]
+    ExecutionModeNotImplemented(&'static str),
+
+    #[error("order was rejected by exchange: {0}")]
+    OrderRejected(String),
+
+    #[error("cancel request was rejected by exchange: {0}")]
+    CancelRejected(String),
 }

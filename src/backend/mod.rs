@@ -1,20 +1,15 @@
+mod live;
+
 use std::future::Future;
 use std::pin::Pin;
 
-use crate::error::EtherealBotError;
+use crate::error::EtherealRuntimeError;
 use crate::models::dto::{CancelOrderRequest, CancelOrderResult, OrderRequest, SubmitOrderResult};
-use crate::settings::ExecutionMode;
 
-// TODO(step-3): remove this allowance once OrderBackend is wired into EtherealBot.
-#[allow(dead_code)]
 pub(crate) type BackendFuture<'a, T> =
-    Pin<Box<dyn Future<Output = Result<T, EtherealBotError>> + Send + 'a>>;
+    Pin<Box<dyn Future<Output = Result<T, EtherealRuntimeError>> + Send + 'a>>;
 
-// TODO(step-3): remove this allowance once concrete backends are implemented and used.
-#[allow(dead_code)]
 pub(crate) trait OrderBackend: Send + Sync {
-    fn mode(&self) -> ExecutionMode;
-
     fn submit_order<'a>(
         &'a self,
         request: &'a OrderRequest,
@@ -25,3 +20,5 @@ pub(crate) trait OrderBackend: Send + Sync {
         request: &'a CancelOrderRequest,
     ) -> BackendFuture<'a, CancelOrderResult>;
 }
+
+pub(crate) use live::LiveBackend;

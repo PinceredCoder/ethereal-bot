@@ -1,11 +1,11 @@
-use crate::EtherealBot;
+use crate::EtherealRuntime;
 use crate::settings::Config;
 
 #[tokio::test]
 async fn measure_post_only_latency_with_ws() {
     let private_key = std::env::var("PRIVATE_KEY").expect("PRIVATE_KEY required");
     let config = Config::testnet(private_key);
-    let mut bot = EtherealBot::new(&config).await.unwrap();
+    let mut bot = EtherealRuntime::new(&config).await.unwrap();
 
     bot.subscribe_order_updates("48119502-2465-45c5-970e-27a28a4e0e3c")
         .await

@@ -12,16 +12,17 @@ use std::sync::Arc;
 use alloy::primitives::Address;
 use alloy_sol_types::{Eip712Domain, eip712_domain};
 use dashmap::DashMap;
-pub use error::EtherealBotError;
+pub use error::EtherealRuntimeError;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use uuid::Uuid;
 
+use crate::backend::{LiveBackend, OrderBackend};
 use crate::models::contracts::TradeOrder;
 use crate::models::dto::{
-    CancelOrderData, CancelOrderRequest, OrderRequest, OrderUpdateData, Timestamp, TradeOrderData,
-    parse_order_update,
+    CancelOrderData, CancelOrderRequest, CancelOrderResult, OrderRequest, OrderUpdateData,
+    SubmitOrderResult, Timestamp, TradeOrderData, parse_order_update,
 };
 use crate::settings::{Config, ExecutionMode};
 
@@ -43,24 +44,29 @@ pub(crate) fn make_domain(chain_id: u64, exchange: Address) -> Eip712Domain {
     }
 }
 
-pub struct EtherealBot {
+pub struct EtherealRuntime {
     signer: crate::signer::Signer,
-    http_client: reqwest::Client,
     domain: Eip712Domain,
-
-    rest_url: url::Url,
-    execution_mode: ExecutionMode,
+    // TODO(step-4+): evaluate replacing dyn dispatch with compile-time backend wiring.
+    order_backend: Arc<dyn OrderBackend>,
 
     ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
     pending_orders: Arc<DashMap<Uuid, oneshot::Sender<(OrderUpdateData, Instant)>>>,
 }
 
-impl EtherealBot {
-    pub async fn new(config: &Config) -> Result<Self, EtherealBotError> {
+impl EtherealRuntime {
+    pub async fn new(config: &Config) -> Result<Self, EtherealRuntimeError> {
         let (ws_write, ws_read) = Self::connect_ws(&config.ws_url).await?;
         let (ws_sender, ws_receiver) = tokio::sync::mpsc::channel(32);
 
         let pending_orders = Arc::new(DashMap::new());
+        let http_client = reqwest::Client::new();
+        let order_backend: Arc<dyn OrderBackend> = match config.execution_mode {
+            ExecutionMode::Live => Arc::new(LiveBackend::new(http_client, config.rest_url.clone())),
+            ExecutionMode::Paper => {
+                return Err(EtherealRuntimeError::ExecutionModeNotImplemented("paper"));
+            }
+        };
 
         tokio::spawn(Self::spawn_write_job(ws_write, ws_receiver));
         tokio::spawn(Self::spawn_read_job(
@@ -72,15 +78,15 @@ impl EtherealBot {
         Ok(Self {
             signer: crate::signer::Signer::new(&config.signer_config),
             domain: make_domain(config.chain_id, config.exchange),
-            http_client: reqwest::Client::new(),
-            rest_url: config.rest_url.clone(),
-            execution_mode: config.execution_mode,
+            order_backend,
             ws_sender,
             pending_orders,
         })
     }
 
-    async fn connect_ws(ws_url: &url::Url) -> Result<(WsWriteType, WsReadType), EtherealBotError> {
+    async fn connect_ws(
+        ws_url: &url::Url,
+    ) -> Result<(WsWriteType, WsReadType), EtherealRuntimeError> {
         use tokio_tungstenite::tungstenite::Message;
 
         let url = ws_url.join("socket.io/?EIO=4&transport=websocket")?;
@@ -88,7 +94,7 @@ impl EtherealBot {
         let (ws_stream, response) = tokio_tungstenite::connect_async(url.to_string()).await?;
 
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
-            return Err(EtherealBotError::Connection(format!(
+            return Err(EtherealRuntimeError::Connection(format!(
                 "unexpected status: {}",
                 response.status(),
             )));
@@ -171,7 +177,7 @@ impl EtherealBot {
     pub async fn subscribe_order_updates(
         &self,
         subaccount_id: &str,
-    ) -> Result<(), EtherealBotError> {
+    ) -> Result<(), EtherealRuntimeError> {
         use tokio_tungstenite::tungstenite::Message;
 
         let msg = format!(
@@ -200,7 +206,7 @@ impl EtherealBot {
             tokio::time::Instant,
             oneshot::Receiver<(OrderUpdateData, Instant)>,
         ),
-        EtherealBotError,
+        EtherealRuntimeError,
     > {
         let ts = Timestamp::now();
 
@@ -232,25 +238,24 @@ impl EtherealBot {
         self.pending_orders.insert(client_order_id, sender);
 
         let t0 = tokio::time::Instant::now();
-        let res = self
-            .http_client
-            .post(format!("{}/v1/order", self.rest_url))
-            .json(&order)
-            .send()
-            .await?;
+        let submit_result = self.order_backend.submit_order(&order).await;
+        let submit_result = match submit_result {
+            Ok(value) => value,
+            Err(err) => {
+                self.pending_orders.remove(&client_order_id);
+                return Err(err);
+            }
+        };
 
-        let body: serde_json::Value = res.json().await?;
-
-        // Если REST вернул ошибку — убираем sender из DashMap
-        if body.get("result").and_then(|r| r.as_str()) != Some("Ok") {
+        if let SubmitOrderResult::Rejected { payload } = submit_result {
             self.pending_orders.remove(&client_order_id);
-            return Err(EtherealBotError::Api(body.to_string()));
+            return Err(EtherealRuntimeError::OrderRejected(payload.to_string()));
         }
 
         Ok((client_order_id, t0, receiver))
     }
 
-    pub async fn cancel_order(&mut self, order_id: Uuid) -> Result<(), EtherealBotError> {
+    pub async fn cancel_order(&mut self, order_id: Uuid) -> Result<(), EtherealRuntimeError> {
         let ts_cancel = Timestamp::now();
         let (cancel_sig, order) = self.signer.sign_cancel_order(ts_cancel.nonce, &self.domain);
         let cancel_data = CancelOrderData::from_cancel_order(order, vec![order_id], vec![]);
@@ -259,16 +264,11 @@ impl EtherealBot {
             signature: format!("0x{}", hex::encode(cancel_sig.as_bytes())),
         };
 
-        self.http_client
-            .post(format!("{}/v1/order/cancel", self.rest_url))
-            .json(&cancel_req)
-            .send()
-            .await?;
-
-        Ok(())
-    }
-
-    pub fn execution_mode(&self) -> ExecutionMode {
-        self.execution_mode
+        match self.order_backend.cancel_order(&cancel_req).await? {
+            CancelOrderResult::Accepted { .. } => Ok(()),
+            CancelOrderResult::Rejected { payload } => {
+                Err(EtherealRuntimeError::CancelRejected(payload.to_string()))
+            }
+        }
     }
 }

@@ -22,6 +22,24 @@ impl LiveBackend {
             EtherealRuntimeError::RequestDeliveryUncertain(err)
         }
     }
+
+    fn is_submit_accepted(payload: &serde_json::Value) -> bool {
+        payload.get("result").and_then(|value| value.as_str()) == Some("Ok")
+    }
+
+    fn is_cancel_accepted(payload: &serde_json::Value) -> bool {
+        let Some(items) = payload.get("data").and_then(|value| value.as_array()) else {
+            return false;
+        };
+
+        if items.is_empty() {
+            return false;
+        }
+
+        items
+            .iter()
+            .all(|item| item.get("result").and_then(|value| value.as_str()) == Some("Ok"))
+    }
 }
 
 impl OrderBackend for LiveBackend {
@@ -43,7 +61,7 @@ impl OrderBackend for LiveBackend {
                 .await
                 .map_err(EtherealRuntimeError::RequestDeliveryUncertain)?;
 
-            if payload.get("result").and_then(|r| r.as_str()) == Some("Ok") {
+            if Self::is_submit_accepted(&payload) {
                 Ok(SubmitOrderResult::Accepted { payload })
             } else {
                 Ok(SubmitOrderResult::Rejected { payload })
@@ -69,7 +87,7 @@ impl OrderBackend for LiveBackend {
                 .await
                 .map_err(EtherealRuntimeError::RequestDeliveryUncertain)?;
 
-            if payload.get("result").and_then(|r| r.as_str()) == Some("Ok") {
+            if Self::is_cancel_accepted(&payload) {
                 Ok(CancelOrderResult::Accepted { payload })
             } else {
                 Ok(CancelOrderResult::Rejected { payload })

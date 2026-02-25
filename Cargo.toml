@@ -7,6 +7,7 @@ edition = "2024"
 alloy = { version = "1.7.3", features = ["eip712"] }
 alloy-contract = "1.7.3"
 alloy-sol-types = "1.5.7"
+bigdecimal = { version = "0.4.10", features = ["serde"] }
 config = "0.15.19"
 dashmap = "6.1.0"
 futures-util = "0.3.32"

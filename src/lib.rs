@@ -22,7 +22,7 @@ use crate::backend::{LiveBackend, OrderBackendRuntime, PaperBackend};
 use crate::models::contracts::TradeOrder;
 use crate::models::dto::{
     CancelOrderData, CancelOrderRequest, CancelOrderResult, OrderRequest, OrderUpdateData,
-    SubmitOrderResult, Timestamp, TradeOrderData, parse_order_update,
+    SubmitOrderResult, Timestamp, TradeOrderData, WsEvent, parse_ws_event,
 };
 use crate::settings::{Config, ExecutionMode};
 
@@ -155,13 +155,19 @@ impl EtherealRuntime {
 
                     let received_at = Instant::now();
 
-                    if let Some(payload) = parse_order_update(&text) {
-                        for update in payload.data {
-                            if let Some((_, sender)) =
-                                pending_orders.remove(&update.client_order_id)
-                            {
-                                let _ = sender.send((update, received_at));
+                    if let Some(event) = parse_ws_event(&text) {
+                        match event {
+                            WsEvent::OrderUpdate(updates) => {
+                                for update in updates {
+                                    if let Some((_, sender)) =
+                                        pending_orders.remove(&update.client_order_id)
+                                    {
+                                        let _ = sender.send((update, received_at));
+                                    }
+                                }
                             }
+                            WsEvent::MarketPrice(_) => {}
+                            WsEvent::Unknown { .. } => {}
                         }
                     }
                 }

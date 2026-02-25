@@ -1,3 +1,4 @@
+use bigdecimal::BigDecimal;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -119,7 +120,7 @@ pub enum CancelOrderResult {
     Rejected { payload: serde_json::Value },
 }
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderUpdateData {
     pub id: Uuid,
@@ -129,13 +130,158 @@ pub struct OrderUpdateData {
     pub client_order_id: Uuid,
 }
 
-#[derive(Debug, serde::Deserialize)]
-pub struct WsEnvelope {
-    pub data: Vec<OrderUpdateData>,
+#[derive(Debug, Clone, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MarketPriceData {
+    pub product_id: Uuid,
+    pub best_bid_price: BigDecimal,
+    pub best_ask_price: BigDecimal,
+    pub oracle_price: BigDecimal,
+    #[serde(rename = "price24hAgo")]
+    pub price24h_ago: BigDecimal,
 }
 
-pub fn parse_order_update(msg: &str) -> Option<WsEnvelope> {
+#[derive(Debug, Clone, PartialEq)]
+pub enum WsEvent {
+    OrderUpdate(Vec<OrderUpdateData>),
+    MarketPrice(Vec<MarketPriceData>),
+    Unknown {
+        event: String,
+        payload: serde_json::Value,
+    },
+}
+
+pub fn parse_ws_event(msg: &str) -> Option<WsEvent> {
     let payload = msg.strip_prefix("42/v1/stream,")?;
-    let (_, envelope): (&str, WsEnvelope) = serde_json::from_str(payload).ok()?;
-    Some(envelope)
+    let (event, payload): (String, serde_json::Value) = serde_json::from_str(payload).ok()?;
+
+    match event.as_str() {
+        "OrderUpdate" => parse_event_items(payload).map(WsEvent::OrderUpdate),
+        "MarketPrice" => parse_event_items(payload).map(WsEvent::MarketPrice),
+        _ => Some(WsEvent::Unknown { event, payload }),
+    }
+}
+
+fn parse_event_items<T: serde::de::DeserializeOwned>(payload: serde_json::Value) -> Option<Vec<T>> {
+    match payload {
+        serde_json::Value::Array(_) => serde_json::from_value(payload).ok(),
+        serde_json::Value::Object(mut object) => {
+            if let Some(data_payload) = object.remove("data") {
+                match data_payload {
+                    serde_json::Value::Array(_) => serde_json::from_value(data_payload).ok(),
+                    _ => serde_json::from_value(data_payload)
+                        .ok()
+                        .map(|item| vec![item]),
+                }
+            } else {
+                serde_json::from_value(serde_json::Value::Object(object))
+                    .ok()
+                    .map(|item| vec![item])
+            }
+        }
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use bigdecimal::BigDecimal;
+    use uuid::Uuid;
+
+    use super::{WsEvent, parse_ws_event};
+
+    #[test]
+    fn parse_order_update_object_payload() {
+        let msg = concat!(
+            "42/v1/stream,",
+            r#"["OrderUpdate",{"data":[{"id":"11111111-1111-1111-1111-111111111111","status":"OPEN","createdAt":1712019600000,"updatedAt":1712019600100,"clientOrderId":"22222222-2222-2222-2222-222222222222"}]}]"#
+        );
+
+        let event = parse_ws_event(msg).expect("expected parsed event");
+        match event {
+            WsEvent::OrderUpdate(updates) => {
+                assert_eq!(updates.len(), 1);
+                let update = &updates[0];
+                assert_eq!(update.status, "OPEN");
+                assert_eq!(
+                    update.client_order_id,
+                    Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()
+                );
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_market_price_array_payload() {
+        let msg = concat!(
+            "42/v1/stream,",
+            r#"["MarketPrice",[{"bestAskPrice":"65107","bestBidPrice":"65102","oraclePrice":"65087.60585299","price24hAgo":"63202.61954649","productId":"bc7d5575-3711-4532-a000-312bfacfb767"}]]"#
+        );
+
+        let event = parse_ws_event(msg).expect("expected parsed event");
+        match event {
+            WsEvent::MarketPrice(items) => {
+                assert_eq!(items.len(), 1);
+                let item = &items[0];
+                assert_eq!(
+                    item.product_id,
+                    Uuid::parse_str("bc7d5575-3711-4532-a000-312bfacfb767").unwrap()
+                );
+                assert_eq!(item.best_bid_price, BigDecimal::from_str("65102").unwrap());
+                assert_eq!(item.best_ask_price, BigDecimal::from_str("65107").unwrap());
+                assert_eq!(
+                    item.oracle_price,
+                    BigDecimal::from_str("65087.60585299").unwrap()
+                );
+                assert_eq!(
+                    item.price24h_ago,
+                    BigDecimal::from_str("63202.61954649").unwrap()
+                );
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_market_price_single_object_payload() {
+        let msg = concat!(
+            "42/v1/stream,",
+            r#"["MarketPrice",{"bestAskPrice":"65107","bestBidPrice":"65102","oraclePrice":"65087.60585299","price24hAgo":"63202.61954649","productId":"bc7d5575-3711-4532-a000-312bfacfb767"}]"#
+        );
+
+        let event = parse_ws_event(msg).expect("expected parsed event");
+        match event {
+            WsEvent::MarketPrice(items) => assert_eq!(items.len(), 1),
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_event() {
+        let msg = r#"42/v1/stream,["FooEvent",{"k":"v"}]"#;
+        let event = parse_ws_event(msg).expect("expected parsed event");
+
+        match event {
+            WsEvent::Unknown { event, payload } => {
+                assert_eq!(event, "FooEvent");
+                assert_eq!(payload["k"], "v");
+            }
+            other => panic!("unexpected event: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_non_namespace_returns_none() {
+        let msg = r#"42/other,["MarketPrice",[]]"#;
+        assert!(parse_ws_event(msg).is_none());
+    }
+
+    #[test]
+    fn parse_malformed_json_returns_none() {
+        let msg = r#"42/v1/stream,["MarketPrice",[{"productId":"bad"}"#;
+        assert!(parse_ws_event(msg).is_none());
+    }
 }

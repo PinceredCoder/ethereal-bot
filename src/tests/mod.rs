@@ -3,6 +3,7 @@ use alloy::sol;
 
 mod init;
 mod latency;
+mod ws_samples;
 
 const RPC_URL: &str = "https://rpc.etherealtest.net";
 const EXCHANGE: Address = address!("1F0327A80e43FEF1Cd872DC5d38dCe4A165c0643");

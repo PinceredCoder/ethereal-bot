@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::backend::{LiveBackend, OrderBackend};
+use crate::backend::{LiveBackend, OrderBackendRuntime, PaperBackend};
 use crate::models::contracts::TradeOrder;
 use crate::models::dto::{
     CancelOrderData, CancelOrderRequest, CancelOrderResult, OrderRequest, OrderUpdateData,
@@ -47,8 +47,7 @@ pub(crate) fn make_domain(chain_id: u64, exchange: Address) -> Eip712Domain {
 pub struct EtherealRuntime {
     signer: crate::signer::Signer,
     domain: Eip712Domain,
-    // TODO(step-4+): evaluate replacing dyn dispatch with compile-time backend wiring.
-    order_backend: Arc<dyn OrderBackend>,
+    order_backend: OrderBackendRuntime,
 
     ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
     pending_orders: Arc<DashMap<Uuid, oneshot::Sender<(OrderUpdateData, Instant)>>>,
@@ -61,10 +60,12 @@ impl EtherealRuntime {
 
         let pending_orders = Arc::new(DashMap::new());
         let http_client = reqwest::Client::new();
-        let order_backend: Arc<dyn OrderBackend> = match config.execution_mode {
-            ExecutionMode::Live => Arc::new(LiveBackend::new(http_client, config.rest_url.clone())),
+        let order_backend = match config.execution_mode {
+            ExecutionMode::Live => {
+                OrderBackendRuntime::Live(LiveBackend::new(http_client, config.rest_url.clone()))
+            }
             ExecutionMode::Paper => {
-                return Err(EtherealRuntimeError::ExecutionModeNotImplemented("paper"));
+                OrderBackendRuntime::Paper(PaperBackend::new(http_client, config.rest_url.clone()))
             }
         };
 

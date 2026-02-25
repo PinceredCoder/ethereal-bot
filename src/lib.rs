@@ -35,6 +35,16 @@ type WsReadType = futures_util::stream::SplitStream<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
 >;
 
+fn build_subscribe_order_updates_frame(subaccount_id: &str) -> String {
+    format!(
+        r#"42/v1/stream,["subscribe",{{"type":"OrderUpdate","subaccountId":"{subaccount_id}"}}]"#
+    )
+}
+
+fn build_subscribe_market_price_frame(product_id: Uuid) -> String {
+    format!(r#"42/v1/stream,["subscribe",{{"type":"MarketPrice","productId":"{product_id}"}}]"#)
+}
+
 pub(crate) fn make_domain(chain_id: u64, exchange: Address) -> Eip712Domain {
     eip712_domain! {
         name: "Ethereal",
@@ -187,14 +197,32 @@ impl EtherealRuntime {
     ) -> Result<(), EtherealRuntimeError> {
         use tokio_tungstenite::tungstenite::Message;
 
-        let msg = format!(
-            r#"42/v1/stream,["subscribe",{{"type":"OrderUpdate","subaccountId":"{subaccount_id}"}}]"#
-        );
+        let msg = build_subscribe_order_updates_frame(subaccount_id);
 
         self.ws_sender
             .send(Message::Text(msg.into()))
             .await
-            .expect("receiver is dropped");
+            .map_err(|err| {
+                EtherealRuntimeError::Connection(format!("websocket send failed: {err}"))
+            })?;
+
+        Ok(())
+    }
+
+    pub async fn subscribe_market_price(
+        &self,
+        product_id: Uuid,
+    ) -> Result<(), EtherealRuntimeError> {
+        use tokio_tungstenite::tungstenite::Message;
+
+        let msg = build_subscribe_market_price_frame(product_id);
+
+        self.ws_sender
+            .send(Message::Text(msg.into()))
+            .await
+            .map_err(|err| {
+                EtherealRuntimeError::Connection(format!("websocket send failed: {err}"))
+            })?;
 
         Ok(())
     }
@@ -278,6 +306,56 @@ impl EtherealRuntime {
             CancelOrderResult::Rejected { payload } => {
                 Err(EtherealRuntimeError::CancelRejected(payload.to_string()))
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod ws_subscription_tests {
+    use tokio::sync::mpsc;
+    use tokio_tungstenite::tungstenite::Message;
+    use uuid::Uuid;
+
+    use super::{build_subscribe_market_price_frame, build_subscribe_order_updates_frame};
+    use crate::EtherealRuntimeError;
+
+    #[test]
+    fn order_update_subscribe_frame_is_correct() {
+        let frame = build_subscribe_order_updates_frame("subaccount-123");
+        assert_eq!(
+            frame,
+            r#"42/v1/stream,["subscribe",{"type":"OrderUpdate","subaccountId":"subaccount-123"}]"#
+        );
+    }
+
+    #[test]
+    fn market_price_subscribe_frame_is_correct() {
+        let product_id = Uuid::parse_str("bc7d5575-3711-4532-a000-312bfacfb767").unwrap();
+        let frame = build_subscribe_market_price_frame(product_id);
+        assert_eq!(
+            frame,
+            r#"42/v1/stream,["subscribe",{"type":"MarketPrice","productId":"bc7d5575-3711-4532-a000-312bfacfb767"}]"#
+        );
+    }
+
+    #[tokio::test]
+    async fn closed_ws_channel_maps_to_connection_error() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+
+        let err = tx
+            .send(Message::Text("42/v1/stream,[]".into()))
+            .await
+            .map_err(|send_err| {
+                EtherealRuntimeError::Connection(format!("websocket send failed: {send_err}"))
+            })
+            .expect_err("closed channel should return error");
+
+        match err {
+            EtherealRuntimeError::Connection(message) => {
+                assert!(message.contains("websocket send failed"));
+            }
+            other => panic!("unexpected error variant: {other:?}"),
         }
     }
 }

@@ -104,16 +104,12 @@ pub struct CancelOrderRequest {
     pub signature: String,
 }
 
-// TODO(step-3): remove this allowance once backend implementations construct these results.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SubmitOrderResult {
     Accepted { payload: serde_json::Value },
     Rejected { payload: serde_json::Value },
 }
 
-// TODO(step-3): remove this allowance once backend implementations construct these results.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum CancelOrderResult {
     Accepted { payload: serde_json::Value },

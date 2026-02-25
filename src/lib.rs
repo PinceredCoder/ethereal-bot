@@ -1,5 +1,5 @@
-mod backend;
 mod error;
+mod executor;
 mod models;
 mod settings;
 mod signer;
@@ -18,7 +18,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::time::Instant;
 use uuid::Uuid;
 
-use crate::backend::{LiveBackend, OrderBackendRuntime, PaperBackend};
+use crate::executor::{LiveExecutor, OrderExecutorRuntime, PaperExecutor};
 use crate::models::contracts::TradeOrder;
 use crate::models::dto::{
     CancelOrderData, CancelOrderRequest, CancelOrderResult, OrderRequest, OrderUpdateData,
@@ -57,7 +57,7 @@ pub(crate) fn make_domain(chain_id: u64, exchange: Address) -> Eip712Domain {
 pub struct EtherealRuntime {
     signer: crate::signer::Signer,
     domain: Eip712Domain,
-    order_backend: OrderBackendRuntime,
+    order_executor: OrderExecutorRuntime,
 
     ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
     pending_orders: Arc<DashMap<Uuid, oneshot::Sender<(OrderUpdateData, Instant)>>>,
@@ -70,13 +70,14 @@ impl EtherealRuntime {
 
         let pending_orders = Arc::new(DashMap::new());
         let http_client = reqwest::Client::new();
-        let order_backend = match config.execution_mode {
+        let order_executor = match config.execution_mode {
             ExecutionMode::Live => {
-                OrderBackendRuntime::Live(LiveBackend::new(http_client, config.rest_url.clone()))
+                OrderExecutorRuntime::Live(LiveExecutor::new(http_client, config.rest_url.clone()))
             }
-            ExecutionMode::Paper => {
-                OrderBackendRuntime::Paper(PaperBackend::new(http_client, config.rest_url.clone()))
-            }
+            ExecutionMode::Paper => OrderExecutorRuntime::Paper(PaperExecutor::new(
+                http_client,
+                config.rest_url.clone(),
+            )),
         };
 
         tokio::spawn(Self::spawn_write_job(ws_write, ws_receiver));
@@ -89,7 +90,7 @@ impl EtherealRuntime {
         Ok(Self {
             signer: crate::signer::Signer::new(&config.signer_config),
             domain: make_domain(config.chain_id, config.exchange),
-            order_backend,
+            order_executor,
             ws_sender,
             pending_orders,
         })
@@ -272,7 +273,7 @@ impl EtherealRuntime {
         self.pending_orders.insert(client_order_id, sender);
 
         let t0 = tokio::time::Instant::now();
-        let submit_result = self.order_backend.submit_order(&order).await;
+        let submit_result = self.order_executor.submit_order(&order).await;
         let submit_result = match submit_result {
             Ok(value) => value,
             Err(err) => {
@@ -301,7 +302,7 @@ impl EtherealRuntime {
             signature: format!("0x{}", hex::encode(cancel_sig.as_bytes())),
         };
 
-        match self.order_backend.cancel_order(&cancel_req).await? {
+        match self.order_executor.cancel_order(&cancel_req).await? {
             CancelOrderResult::Accepted { .. } => Ok(()),
             CancelOrderResult::Rejected { payload } => {
                 Err(EtherealRuntimeError::CancelRejected(payload.to_string()))

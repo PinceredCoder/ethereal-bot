@@ -4,7 +4,7 @@ mod paper;
 use crate::error::EtherealRuntimeError;
 use crate::models::dto::{CancelOrderRequest, CancelOrderResult, OrderRequest, SubmitOrderResult};
 
-pub(crate) trait OrderBackend: Send + Sync {
+pub(crate) trait OrderExecutor: Send + Sync {
     async fn submit_order(
         &self,
         request: &OrderRequest,
@@ -46,19 +46,19 @@ pub(crate) fn is_cancel_accepted(payload: &serde_json::Value) -> bool {
         .all(|item| item.get("result").and_then(|value| value.as_str()) == Some("Ok"))
 }
 
-pub(crate) enum OrderBackendRuntime {
-    Live(LiveBackend),
-    Paper(PaperBackend),
+pub(crate) enum OrderExecutorRuntime {
+    Live(LiveExecutor),
+    Paper(PaperExecutor),
 }
 
-impl OrderBackendRuntime {
+impl OrderExecutorRuntime {
     pub(crate) async fn submit_order(
         &self,
         request: &OrderRequest,
     ) -> Result<SubmitOrderResult, EtherealRuntimeError> {
         match self {
-            Self::Live(backend) => backend.submit_order(request).await,
-            Self::Paper(backend) => backend.submit_order(request).await,
+            Self::Live(executor) => executor.submit_order(request).await,
+            Self::Paper(executor) => executor.submit_order(request).await,
         }
     }
 
@@ -67,11 +67,11 @@ impl OrderBackendRuntime {
         request: &CancelOrderRequest,
     ) -> Result<CancelOrderResult, EtherealRuntimeError> {
         match self {
-            Self::Live(backend) => backend.cancel_order(request).await,
-            Self::Paper(backend) => backend.cancel_order(request).await,
+            Self::Live(executor) => executor.cancel_order(request).await,
+            Self::Paper(executor) => executor.cancel_order(request).await,
         }
     }
 }
 
-pub(crate) use live::LiveBackend;
-pub(crate) use paper::PaperBackend;
+pub(crate) use live::LiveExecutor;
+pub(crate) use paper::PaperExecutor;

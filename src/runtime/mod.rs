@@ -1,21 +1,25 @@
-use std::sync::Arc;
-
 use alloy::primitives::Address;
 use alloy_sol_types::{Eip712Domain, eip712_domain};
-use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::error::EtherealRuntimeError;
 use crate::executor::{LiveExecutor, OrderExecutorRuntime, PaperExecutor};
 use crate::logging::targets;
+use crate::models::common::TimeInForce;
 use crate::models::contracts::TradeOrder;
 use crate::models::dto::{
-    CancelOrderData, CancelOrderRequest, OrderRequest, OrderUpdateData, Timestamp, TradeOrderData,
-    WsEvent, parse_ws_event,
+    CancelOrderData, CancelOrderRequest, MarketPriceData, OrderRequest, OrderUpdateData, Timestamp,
+    TradeOrderData, WsEvent, parse_ws_event,
 };
 use crate::settings::{Config, ExecutionMode};
+
+#[derive(Debug, Clone)]
+pub enum RuntimeEvent {
+    OrderUpdate(OrderUpdateData),
+    MarketPrice(MarketPriceData),
+}
 
 type WsWriteType = futures_util::stream::SplitSink<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
@@ -26,7 +30,7 @@ type WsReadType = futures_util::stream::SplitStream<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
 >;
 
-fn build_subscribe_order_updates_frame(subaccount_id: &str) -> String {
+fn build_subscribe_order_updates_frame(subaccount_id: Uuid) -> String {
     format!(
         r#"42/v1/stream,["subscribe",{{"type":"OrderUpdate","subaccountId":"{subaccount_id}"}}]"#
     )
@@ -51,15 +55,16 @@ pub struct EtherealRuntime {
     order_executor: OrderExecutorRuntime,
 
     ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
-    pending_orders: Arc<DashMap<Uuid, oneshot::Sender<OrderUpdateData>>>,
 }
 
 impl EtherealRuntime {
-    pub async fn new(config: &Config) -> Result<Self, EtherealRuntimeError> {
+    pub async fn new(
+        config: &Config,
+    ) -> Result<(Self, mpsc::UnboundedReceiver<RuntimeEvent>), EtherealRuntimeError> {
         let (ws_write, ws_read) = Self::connect_ws(&config.ws_url).await?;
         let (ws_sender, ws_receiver) = tokio::sync::mpsc::channel(32);
+        let (event_sender, event_receiver) = mpsc::unbounded_channel();
 
-        let pending_orders = Arc::new(DashMap::new());
         let http_client = reqwest::Client::new();
         let order_executor = match config.execution_mode {
             ExecutionMode::Live => {
@@ -75,16 +80,18 @@ impl EtherealRuntime {
         tokio::spawn(Self::spawn_read_job(
             ws_read,
             ws_sender.clone(),
-            Arc::clone(&pending_orders),
+            event_sender,
         ));
 
-        Ok(Self {
-            signer: crate::signer::Signer::new(&config.signer_config),
-            domain: make_domain(config.chain_id, config.exchange),
-            order_executor,
-            ws_sender,
-            pending_orders,
-        })
+        Ok((
+            Self {
+                signer: crate::signer::Signer::new(&config.signer_config),
+                domain: make_domain(config.chain_id, config.exchange),
+                order_executor,
+                ws_sender,
+            },
+            event_receiver,
+        ))
     }
 
     async fn connect_ws(
@@ -165,7 +172,7 @@ impl EtherealRuntime {
     async fn spawn_read_job(
         mut ws_read: WsReadType,
         ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
-        pending_orders: Arc<DashMap<Uuid, oneshot::Sender<OrderUpdateData>>>,
+        event_sender: mpsc::UnboundedSender<RuntimeEvent>,
     ) {
         use tokio_tungstenite::tungstenite::Message;
 
@@ -187,19 +194,17 @@ impl EtherealRuntime {
                         match event {
                             WsEvent::OrderUpdate(updates) => {
                                 for update in updates {
-                                    if let Some((_, sender)) =
-                                        pending_orders.remove(&update.client_order_id)
-                                    {
-                                        let _ = sender.send(update);
-                                    }
+                                    event_sender
+                                        .send(RuntimeEvent::OrderUpdate(update))
+                                        .expect("runtime event receiver dropped");
                                 }
                             }
                             WsEvent::MarketPrice(prices) => {
-                                tracing::debug!(
-                                    target: targets::RUNTIME_WS,
-                                    updates = prices.len(),
-                                    "received market price update frame"
-                                );
+                                for price in prices {
+                                    event_sender
+                                        .send(RuntimeEvent::MarketPrice(price))
+                                        .expect("runtime event receiver dropped");
+                                }
                             }
                             WsEvent::Unknown { event, payload } => {
                                 tracing::debug!(
@@ -224,7 +229,7 @@ impl EtherealRuntime {
 
     pub async fn subscribe_order_updates(
         &self,
-        subaccount_id: &str,
+        subaccount_id: Uuid,
     ) -> Result<(), EtherealRuntimeError> {
         use tokio_tungstenite::tungstenite::Message;
 
@@ -237,7 +242,7 @@ impl EtherealRuntime {
 
         tracing::info!(
             target: targets::RUNTIME_WS,
-            subaccount_id,
+            %subaccount_id,
             "subscribed to order updates"
         );
 
@@ -273,15 +278,8 @@ impl EtherealRuntime {
         side: u8,
         product_id: u32,
         post_only: bool,
-        time_in_force: &'static str,
-    ) -> Result<
-        (
-            Uuid,
-            tokio::time::Instant,
-            oneshot::Receiver<OrderUpdateData>,
-        ),
-        EtherealRuntimeError,
-    > {
+        time_in_force: TimeInForce,
+    ) -> Result<Uuid, EtherealRuntimeError> {
         let ts = Timestamp::now();
 
         let order = TradeOrder {
@@ -315,14 +313,9 @@ impl EtherealRuntime {
             signature: format!("0x{}", hex::encode(signature.as_bytes())),
         };
 
-        let (sender, receiver) = oneshot::channel();
-        self.pending_orders.insert(client_order_id, sender);
-
-        let t0 = tokio::time::Instant::now();
         let _payload = match self.order_executor.submit_order(&order).await {
             Ok(value) => value,
             Err(err) => {
-                self.pending_orders.remove(&client_order_id);
                 tracing::warn!(
                     target: targets::RUNTIME_EXEC,
                     client_order_id = %client_order_id,
@@ -339,13 +332,10 @@ impl EtherealRuntime {
             "order accepted"
         );
 
-        Ok((client_order_id, t0, receiver))
+        Ok(client_order_id)
     }
 
-    pub async fn cancel_order(
-        &mut self,
-        client_order_id: Uuid,
-    ) -> Result<(), EtherealRuntimeError> {
+    pub async fn cancel_order(&self, client_order_id: Uuid) -> Result<(), EtherealRuntimeError> {
         let ts_cancel = Timestamp::now();
         let (cancel_sig, order) = self.signer.sign_cancel_order(ts_cancel.nonce, &self.domain);
         let cancel_data = CancelOrderData::from_cancel_order(order, vec![], vec![client_order_id]);
@@ -369,7 +359,7 @@ impl EtherealRuntime {
         Ok(())
     }
 
-    pub async fn shutdown(&mut self) -> Result<(), EtherealRuntimeError> {
+    pub async fn _shutdown(&mut self) -> Result<(), EtherealRuntimeError> {
         todo!("graceful runtime shutdown is not implemented yet")
     }
 }
@@ -383,10 +373,12 @@ mod ws_subscription_tests {
 
     #[test]
     fn order_update_subscribe_frame_is_correct() {
-        let frame = build_subscribe_order_updates_frame("subaccount-123");
+        let id = Uuid::new_v4();
+
+        let frame = build_subscribe_order_updates_frame(id);
         assert_eq!(
             frame,
-            r#"42/v1/stream,["subscribe",{"type":"OrderUpdate","subaccountId":"subaccount-123"}]"#
+            format!(r#"42/v1/stream,["subscribe",{{"type":"OrderUpdate","subaccountId":"{id}"}}]"#)
         );
     }
 

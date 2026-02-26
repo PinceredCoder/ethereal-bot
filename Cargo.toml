@@ -12,11 +12,13 @@ config = "0.15.19"
 dashmap = "6.1.0"
 futures-util = "0.3.32"
 hex = { version = "0.4.3", features = ["serde"] }
+num-traits = { version = "0.2.19", features = ["i128"] }
 reqwest = { version = "0.13.2", features = ["json"] }
 serde = "1.0.228"
 serde_json = "1.0.149"
+strum = { version = "0.28.0", features = ["derive"] }
 thiserror = "2.0.18"
-tokio = "1.49.0"
+tokio = { version = "1.49.0", features = ["rt-multi-thread"] }
 tokio-tungstenite = { version = "0.28.0", features = ["native-tls"] }
 tracing = "0.1.44"
 tracing-appender = "0.2.4"

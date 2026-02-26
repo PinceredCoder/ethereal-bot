@@ -1,6 +1,7 @@
 use url::Url;
+use uuid::Uuid;
 
-use crate::{LoggingConfig, signer};
+use crate::{logging, signer, trading};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -19,8 +20,9 @@ pub struct Config {
     #[serde(default)]
     pub execution_mode: ExecutionMode,
     #[serde(default)]
-    pub logging: LoggingConfig,
+    pub logging: logging::LoggingConfig,
 
+    pub strategy: trading::settings::StrategyConfig,
     pub signer_config: signer::Config,
 }
 
@@ -59,7 +61,17 @@ impl Config {
             chain_id: 13374202,
             exchange: "1F0327A80e43FEF1Cd872DC5d38dCe4A165c0643".parse().unwrap(),
             execution_mode: ExecutionMode::Live,
-            logging: LoggingConfig::default(),
+            logging: logging::LoggingConfig::default(),
+            strategy: trading::settings::StrategyConfig {
+                subaccount: Uuid::parse_str("48119502-2465-45c5-970e-27a28a4e0e3c").unwrap(),
+                product_id: Uuid::nil(),
+                onchain_product_id: 0,
+                qty_raw: 100_000_000,
+                post_only: true,
+                time_in_force: trading::settings::TimeInForce::default(),
+                tick_size_raw: 1,
+                min_spread_ticks: 1,
+            },
             signer_config: signer::Config {
                 subaccount: hex::decode(
                     "7072696d61727900000000000000000000000000000000000000000000000000",

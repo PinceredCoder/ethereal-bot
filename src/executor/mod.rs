@@ -18,14 +18,6 @@ pub(crate) trait OrderExecutor: Send + Sync {
     ) -> Result<serde_json::Value, ExecutorError>;
 }
 
-pub(crate) fn is_submit_accepted(payload: &serde_json::Value) -> bool {
-    payload
-        .get("result")
-        .and_then(|value| value.as_str())
-        .or_else(|| payload.get("code").and_then(|value| value.as_str()))
-        == Some("Ok")
-}
-
 pub(crate) fn is_cancel_accepted(payload: &serde_json::Value) -> bool {
     let Some(items) = payload.get("data").and_then(|value| value.as_array()) else {
         return false;
@@ -35,9 +27,16 @@ pub(crate) fn is_cancel_accepted(payload: &serde_json::Value) -> bool {
         return false;
     }
 
-    items
-        .iter()
-        .all(|item| item.get("result").and_then(|value| value.as_str()) == Some("Ok"))
+    items.iter().all(|item| {
+        matches!(
+            item.get("result").and_then(|value| value.as_str()),
+            Some("Ok")
+                | Some("AlreadyCanceled")
+                | Some("AlreadyExpired")
+                | Some("AlreadyFilled")
+                | Some("NotFound")
+        )
+    })
 }
 
 pub(crate) enum OrderExecutorRuntime {
@@ -69,3 +68,34 @@ impl OrderExecutorRuntime {
 
 pub(crate) use live::LiveExecutor;
 pub(crate) use paper::PaperExecutor;
+
+#[cfg(test)]
+mod tests {
+    use super::is_cancel_accepted;
+
+    #[test]
+    fn cancel_accepts_ok_and_idempotent_results() {
+        let payload = serde_json::json!({
+            "data": [
+                { "id": "9036443a-441a-4a66-87f2-bd5c44cdca7a", "result": "Ok" },
+                { "id": "9036443a-441a-4a66-87f2-bd5c44cdca7a", "result": "AlreadyCanceled" },
+                { "id": "9036443a-441a-4a66-87f2-bd5c44cdca7a", "result": "NotFound" }
+            ]
+        });
+
+        assert!(is_cancel_accepted(&payload));
+    }
+
+    #[test]
+    fn cancel_rejects_unknown_or_nonce_already_used() {
+        let unknown = serde_json::json!({
+            "data": [{ "id": "9036443a-441a-4a66-87f2-bd5c44cdca7a", "result": "Unknown" }]
+        });
+        let nonce = serde_json::json!({
+            "data": [{ "id": "9036443a-441a-4a66-87f2-bd5c44cdca7a", "result": "NonceAlreadyUsed" }]
+        });
+
+        assert!(!is_cancel_accepted(&unknown));
+        assert!(!is_cancel_accepted(&nonce));
+    }
+}

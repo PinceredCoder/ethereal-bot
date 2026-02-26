@@ -1,4 +1,4 @@
-use super::{ExecutorError, OrderExecutor, is_cancel_accepted, is_submit_accepted};
+use super::{ExecutorError, OrderExecutor, is_cancel_accepted};
 use crate::logging::targets;
 use crate::models::dto::{CancelOrderRequest, OrderRequest};
 
@@ -14,6 +14,12 @@ impl LiveExecutor {
             rest_url,
         }
     }
+}
+
+fn is_submit_created(payload: &serde_json::Value) -> bool {
+    payload.get("id").is_some()
+        && payload.get("filled").is_some()
+        && payload.get("result").is_some()
 }
 
 impl OrderExecutor for LiveExecutor {
@@ -46,7 +52,7 @@ impl OrderExecutor for LiveExecutor {
 
         let payload: serde_json::Value = response.json().await?;
 
-        if is_submit_accepted(&payload) {
+        if is_submit_created(&payload) {
             tracing::info!(
                 target: targets::RUNTIME_EXEC,
                 endpoint = "/v1/order",

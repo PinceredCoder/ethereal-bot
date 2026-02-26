@@ -1,4 +1,4 @@
-use super::{ExecutorError, OrderExecutor, is_submit_accepted};
+use super::{ExecutorError, OrderExecutor};
 use crate::logging::targets;
 use crate::models::dto::{CancelOrderRequest, OrderRequest};
 
@@ -14,6 +14,15 @@ impl PaperExecutor {
             rest_url,
         }
     }
+}
+
+fn is_submit_created(payload: &serde_json::Value) -> bool {
+    payload.get("marginRequired").is_some()
+        && payload.get("marginAvailable").is_some()
+        && payload.get("totalUsedMargin").is_some()
+        && payload.get("riskUsed").is_some()
+        && payload.get("riskAvailable").is_some()
+        && payload.get("code").is_some()
 }
 
 impl OrderExecutor for PaperExecutor {
@@ -47,7 +56,7 @@ impl OrderExecutor for PaperExecutor {
 
         let payload: serde_json::Value = response.json().await?;
 
-        if is_submit_accepted(&payload) {
+        if is_submit_created(&payload) {
             tracing::info!(
                 target: targets::RUNTIME_EXEC,
                 endpoint = "/v1/order/dry-run",

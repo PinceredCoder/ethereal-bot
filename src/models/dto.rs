@@ -2,6 +2,7 @@ use bigdecimal::BigDecimal;
 use serde::Serialize;
 use uuid::Uuid;
 
+use super::common::{OrderStatus, TimeInForce};
 use super::contracts::{CancelOrder, TradeOrder};
 use super::util::format_order_decimal;
 
@@ -20,7 +21,7 @@ pub struct TradeOrderData {
     pub signed_at: u64,
     #[serde(rename = "type")]
     pub order_type: String,
-    pub time_in_force: &'static str,
+    pub time_in_force: TimeInForce,
     pub post_only: bool,
     pub client_order_id: Uuid,
 }
@@ -29,7 +30,7 @@ impl TradeOrderData {
     pub fn from_trade_order(
         order: TradeOrder,
         post_only: bool,
-        time_in_force: &'static str,
+        time_in_force: TimeInForce,
     ) -> Self {
         Self {
             sender: format!("{:?}", order.sender),
@@ -109,7 +110,7 @@ pub struct CancelOrderRequest {
 #[serde(rename_all = "camelCase")]
 pub struct OrderUpdateData {
     pub id: Uuid,
-    pub status: String,
+    pub status: OrderStatus,
     pub created_at: u64,
     pub updated_at: u64,
     pub client_order_id: Uuid,
@@ -176,12 +177,13 @@ mod tests {
     use uuid::Uuid;
 
     use super::{WsEvent, parse_ws_event};
+    use crate::models::common::OrderStatus;
 
     #[test]
     fn parse_order_update_object_payload() {
         let msg = concat!(
             "42/v1/stream,",
-            r#"["OrderUpdate",{"data":[{"id":"11111111-1111-1111-1111-111111111111","status":"OPEN","createdAt":1712019600000,"updatedAt":1712019600100,"clientOrderId":"22222222-2222-2222-2222-222222222222"}]}]"#
+            r#"["OrderUpdate",{"data":[{"id":"11111111-1111-1111-1111-111111111111","status":"PENDING","createdAt":1712019600000,"updatedAt":1712019600100,"clientOrderId":"22222222-2222-2222-2222-222222222222"}]}]"#
         );
 
         let event = parse_ws_event(msg).expect("expected parsed event");
@@ -189,7 +191,7 @@ mod tests {
             WsEvent::OrderUpdate(updates) => {
                 assert_eq!(updates.len(), 1);
                 let update = &updates[0];
-                assert_eq!(update.status, "OPEN");
+                assert_eq!(update.status, OrderStatus::Pending);
                 assert_eq!(
                     update.client_order_id,
                     Uuid::parse_str("22222222-2222-2222-2222-222222222222").unwrap()

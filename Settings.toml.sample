@@ -1,0 +1,27 @@
+rest_url = "https://api.etherealtest.net"
+ws_url = "wss://ws.etherealtest.net"
+chain_id = 13374202
+exchange = "1F0327A80e43FEF1Cd872DC5d38dCe4A165c0643"
+execution_mode = "paper"
+
+[logging]
+enabled = true
+directory = "logs"
+technical_file = "runtime.log"
+decision_file = "decisions.log"
+rotation = "daily"
+file_level = "INFO"
+
+[strategy]
+subaccount = "48119502-2465-45c5-970e-27a28a4e0e3c"
+product_id = "dce327cc-4fbb-4d5d-9ede-1c1fca7ef4ba"
+onchain_product_id = 1
+qty_raw = 100000000
+post_only = true
+time_in_force = "GTD"
+tick_size_raw = 1000000000
+min_spread_ticks = 1
+
+[signer_config]
+private_key = "1111111111111111111111111111111111111111111111111111111111111111"
+subaccount = "7072696d61727900000000000000000000000000000000000000000000000000"

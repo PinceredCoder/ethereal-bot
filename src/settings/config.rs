@@ -1,6 +1,6 @@
 use url::Url;
 
-use crate::signer;
+use crate::{LoggingConfig, signer};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -18,6 +18,8 @@ pub struct Config {
     pub exchange: alloy::primitives::Address,
     #[serde(default)]
     pub execution_mode: ExecutionMode,
+    #[serde(default)]
+    pub logging: LoggingConfig,
 
     pub signer_config: signer::Config,
 }
@@ -57,6 +59,7 @@ impl Config {
             chain_id: 13374202,
             exchange: "1F0327A80e43FEF1Cd872DC5d38dCe4A165c0643".parse().unwrap(),
             execution_mode: ExecutionMode::Live,
+            logging: LoggingConfig::default(),
             signer_config: signer::Config {
                 subaccount: hex::decode(
                     "7072696d61727900000000000000000000000000000000000000000000000000",

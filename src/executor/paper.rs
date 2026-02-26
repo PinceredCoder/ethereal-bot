@@ -1,5 +1,6 @@
 use super::{OrderExecutor, is_cancel_accepted, is_submit_accepted, map_transport_error};
 use crate::error::EtherealRuntimeError;
+use crate::logging::targets;
 use crate::models::dto::{CancelOrderRequest, CancelOrderResult, OrderRequest, SubmitOrderResult};
 
 pub(crate) struct PaperExecutor {
@@ -28,9 +29,9 @@ impl OrderExecutor for PaperExecutor {
             .json(&payload)
             .send()
             .await
-            .map_err(map_transport_error)?
-            .error_for_status()
             .map_err(map_transport_error)?;
+        let status = res.status();
+        let res = res.error_for_status().map_err(map_transport_error)?;
 
         let payload: serde_json::Value = res
             .json()
@@ -38,8 +39,21 @@ impl OrderExecutor for PaperExecutor {
             .map_err(EtherealRuntimeError::RequestDeliveryUncertain)?;
 
         if is_submit_accepted(&payload) {
+            tracing::info!(
+                target: targets::RUNTIME_EXEC,
+                endpoint = "/v1/order/dry-run",
+                status = %status,
+                "paper submit accepted"
+            );
             Ok(SubmitOrderResult::Accepted { payload })
         } else {
+            tracing::warn!(
+                target: targets::RUNTIME_EXEC,
+                endpoint = "/v1/order/dry-run",
+                status = %status,
+                payload = %payload,
+                "paper submit rejected"
+            );
             Ok(SubmitOrderResult::Rejected { payload })
         }
     }
@@ -54,6 +68,11 @@ impl OrderExecutor for PaperExecutor {
                 "message": "cancel is not supported for paper executor yet"
             }]
         });
+
+        tracing::warn!(
+            target: targets::RUNTIME_EXEC,
+            "paper cancel requested but unsupported"
+        );
 
         if is_cancel_accepted(&payload) {
             Ok(CancelOrderResult::Accepted { payload })

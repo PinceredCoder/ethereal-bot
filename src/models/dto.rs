@@ -3,6 +3,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::contracts::{CancelOrder, TradeOrder};
+use super::util::format_order_decimal;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,8 +34,8 @@ impl TradeOrderData {
         Self {
             sender: format!("{:?}", order.sender),
             subaccount: format!("0x{}", hex::encode(order.subaccount)),
-            quantity: (order.quantity as f64 / 1_000_000_000.0).to_string(),
-            price: (order.price / 1_000_000_000).to_string(),
+            quantity: format_order_decimal(order.quantity),
+            price: format_order_decimal(order.price),
             reduce_only: order.reduceOnly,
             side: order.side,
             engine_type: 0,

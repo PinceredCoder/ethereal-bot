@@ -1,27 +1,21 @@
+mod error;
 mod live;
 mod paper;
 
-use crate::error::EtherealRuntimeError;
-use crate::models::dto::{CancelOrderRequest, CancelOrderResult, OrderRequest, SubmitOrderResult};
+pub use error::ExecutorError;
+
+use crate::models::dto::{CancelOrderRequest, OrderRequest};
 
 pub(crate) trait OrderExecutor: Send + Sync {
     async fn submit_order(
         &self,
         request: &OrderRequest,
-    ) -> Result<SubmitOrderResult, EtherealRuntimeError>;
+    ) -> Result<serde_json::Value, ExecutorError>;
 
     async fn cancel_order(
         &self,
         request: &CancelOrderRequest,
-    ) -> Result<CancelOrderResult, EtherealRuntimeError>;
-}
-
-pub(crate) fn map_transport_error(err: reqwest::Error) -> EtherealRuntimeError {
-    if err.is_builder() || err.is_request() || err.is_connect() {
-        EtherealRuntimeError::RequestNotSent(err)
-    } else {
-        EtherealRuntimeError::RequestDeliveryUncertain(err)
-    }
+    ) -> Result<serde_json::Value, ExecutorError>;
 }
 
 pub(crate) fn is_submit_accepted(payload: &serde_json::Value) -> bool {
@@ -55,7 +49,7 @@ impl OrderExecutorRuntime {
     pub(crate) async fn submit_order(
         &self,
         request: &OrderRequest,
-    ) -> Result<SubmitOrderResult, EtherealRuntimeError> {
+    ) -> Result<serde_json::Value, ExecutorError> {
         match self {
             Self::Live(executor) => executor.submit_order(request).await,
             Self::Paper(executor) => executor.submit_order(request).await,
@@ -65,7 +59,7 @@ impl OrderExecutorRuntime {
     pub(crate) async fn cancel_order(
         &self,
         request: &CancelOrderRequest,
-    ) -> Result<CancelOrderResult, EtherealRuntimeError> {
+    ) -> Result<serde_json::Value, ExecutorError> {
         match self {
             Self::Live(executor) => executor.cancel_order(request).await,
             Self::Paper(executor) => executor.cancel_order(request).await,

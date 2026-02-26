@@ -27,17 +27,13 @@ async fn measure_post_only_latency_with_ws() {
             .unwrap();
         let rest_rtt = t0.elapsed();
 
-        let (update, ws_received_at) = ws_receiver.await.unwrap();
-        let ws_rtt = ws_received_at - t0;
-        let ws_after_rest_ms = ws_rtt.as_millis() as i64 - rest_rtt.as_millis() as i64;
+        let update = ws_receiver.await.unwrap();
         let engine_ms = update.updated_at.abs_diff(update.created_at);
 
         println!(
-            "{:<5} {:<14} {:<14} {:<14} {:<14}",
+            "{:<5} {:<14} {:<14}",
             format!("#{i}"),
             format!("{rest_rtt:.1?}"),
-            format!("{ws_rtt:.1?}"),
-            format!("{ws_after_rest_ms:+}ms"),
             format!("{engine_ms}ms"),
         );
 

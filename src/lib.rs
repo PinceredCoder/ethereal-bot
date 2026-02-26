@@ -10,6 +10,7 @@ mod signer;
 mod tests;
 
 pub use error::EtherealRuntimeError;
+pub use executor::ExecutorError;
 pub use logging::{LoggingConfig, LoggingGuards, init_logging};
 pub use runtime::EtherealRuntime;
 pub use settings::{Config, ExecutionMode};

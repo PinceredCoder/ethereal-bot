@@ -5,7 +5,6 @@ use alloy_sol_types::{Eip712Domain, eip712_domain};
 use dashmap::DashMap;
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::Instant;
 use uuid::Uuid;
 
 use crate::error::EtherealRuntimeError;
@@ -13,8 +12,8 @@ use crate::executor::{LiveExecutor, OrderExecutorRuntime, PaperExecutor};
 use crate::logging::targets;
 use crate::models::contracts::TradeOrder;
 use crate::models::dto::{
-    CancelOrderData, CancelOrderRequest, CancelOrderResult, OrderRequest, OrderUpdateData,
-    SubmitOrderResult, Timestamp, TradeOrderData, WsEvent, parse_ws_event,
+    CancelOrderData, CancelOrderRequest, OrderRequest, OrderUpdateData, Timestamp, TradeOrderData,
+    WsEvent, parse_ws_event,
 };
 use crate::settings::{Config, ExecutionMode};
 
@@ -52,7 +51,7 @@ pub struct EtherealRuntime {
     order_executor: OrderExecutorRuntime,
 
     ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
-    pending_orders: Arc<DashMap<Uuid, oneshot::Sender<(OrderUpdateData, Instant)>>>,
+    pending_orders: Arc<DashMap<Uuid, oneshot::Sender<OrderUpdateData>>>,
 }
 
 impl EtherealRuntime {
@@ -104,7 +103,7 @@ impl EtherealRuntime {
         let (ws_stream, response) = tokio_tungstenite::connect_async(url.to_string()).await?;
 
         if response.status() != reqwest::StatusCode::SWITCHING_PROTOCOLS {
-            return Err(EtherealRuntimeError::Connection(format!(
+            return Err(EtherealRuntimeError::WS(format!(
                 "unexpected status: {}",
                 response.status(),
             )));
@@ -166,7 +165,7 @@ impl EtherealRuntime {
     async fn spawn_read_job(
         mut ws_read: WsReadType,
         ws_sender: mpsc::Sender<tokio_tungstenite::tungstenite::Message>,
-        pending_orders: Arc<DashMap<Uuid, oneshot::Sender<(OrderUpdateData, Instant)>>>,
+        pending_orders: Arc<DashMap<Uuid, oneshot::Sender<OrderUpdateData>>>,
     ) {
         use tokio_tungstenite::tungstenite::Message;
 
@@ -184,8 +183,6 @@ impl EtherealRuntime {
                         continue;
                     }
 
-                    let received_at = Instant::now();
-
                     if let Some(event) = parse_ws_event(&text) {
                         match event {
                             WsEvent::OrderUpdate(updates) => {
@@ -193,7 +190,7 @@ impl EtherealRuntime {
                                     if let Some((_, sender)) =
                                         pending_orders.remove(&update.client_order_id)
                                     {
-                                        let _ = sender.send((update, received_at));
+                                        let _ = sender.send(update);
                                     }
                                 }
                             }
@@ -236,9 +233,7 @@ impl EtherealRuntime {
         self.ws_sender
             .send(Message::Text(msg.into()))
             .await
-            .map_err(|err| {
-                EtherealRuntimeError::Connection(format!("websocket send failed: {err}"))
-            })?;
+            .expect("websocket sender dropped");
 
         tracing::info!(
             target: targets::RUNTIME_WS,
@@ -260,9 +255,7 @@ impl EtherealRuntime {
         self.ws_sender
             .send(Message::Text(msg.into()))
             .await
-            .map_err(|err| {
-                EtherealRuntimeError::Connection(format!("websocket send failed: {err}"))
-            })?;
+            .expect("websocket sender dropped");
 
         tracing::info!(
             target: targets::RUNTIME_WS,
@@ -285,7 +278,7 @@ impl EtherealRuntime {
         (
             Uuid,
             tokio::time::Instant,
-            oneshot::Receiver<(OrderUpdateData, Instant)>,
+            oneshot::Receiver<OrderUpdateData>,
         ),
         EtherealRuntimeError,
     > {
@@ -326,8 +319,7 @@ impl EtherealRuntime {
         self.pending_orders.insert(client_order_id, sender);
 
         let t0 = tokio::time::Instant::now();
-        let submit_result = self.order_executor.submit_order(&order).await;
-        let submit_result = match submit_result {
+        let _payload = match self.order_executor.submit_order(&order).await {
             Ok(value) => value,
             Err(err) => {
                 self.pending_orders.remove(&client_order_id);
@@ -337,20 +329,9 @@ impl EtherealRuntime {
                     error = %err,
                     "order submission failed"
                 );
-                return Err(err);
+                return Err(err.into());
             }
         };
-
-        if let SubmitOrderResult::Rejected { payload } = submit_result {
-            self.pending_orders.remove(&client_order_id);
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                client_order_id = %client_order_id,
-                payload = %payload,
-                "order rejected"
-            );
-            return Err(EtherealRuntimeError::OrderRejected(payload.to_string()));
-        }
 
         tracing::info!(
             target: targets::RUNTIME_EXEC,
@@ -379,25 +360,13 @@ impl EtherealRuntime {
             "submitting cancel"
         );
 
-        match self.order_executor.cancel_order(&cancel_req).await? {
-            CancelOrderResult::Accepted { .. } => {
-                tracing::info!(
-                    target: targets::RUNTIME_EXEC,
-                    client_order_id = %client_order_id,
-                    "cancel accepted"
-                );
-                Ok(())
-            }
-            CancelOrderResult::Rejected { payload } => {
-                tracing::warn!(
-                    target: targets::RUNTIME_EXEC,
-                    client_order_id = %client_order_id,
-                    payload = %payload,
-                    "cancel rejected"
-                );
-                Err(EtherealRuntimeError::CancelRejected(payload.to_string()))
-            }
-        }
+        self.order_executor.cancel_order(&cancel_req).await?;
+        tracing::info!(
+            target: targets::RUNTIME_EXEC,
+            client_order_id = %client_order_id,
+            "cancel accepted"
+        );
+        Ok(())
     }
 
     pub async fn shutdown(&mut self) -> Result<(), EtherealRuntimeError> {
@@ -407,8 +376,6 @@ impl EtherealRuntime {
 
 #[cfg(test)]
 mod ws_subscription_tests {
-    use tokio::sync::mpsc;
-    use tokio_tungstenite::tungstenite::Message;
     use uuid::Uuid;
 
     use super::{build_subscribe_market_price_frame, build_subscribe_order_updates_frame};
@@ -433,22 +400,14 @@ mod ws_subscription_tests {
         );
     }
 
-    #[tokio::test]
-    async fn closed_ws_channel_maps_to_connection_error() {
-        let (tx, rx) = mpsc::channel(1);
-        drop(rx);
-
-        let err = tx
-            .send(Message::Text("42/v1/stream,[]".into()))
-            .await
-            .map_err(|send_err| {
-                EtherealRuntimeError::Connection(format!("websocket send failed: {send_err}"))
-            })
-            .expect_err("closed channel should return error");
+    #[test]
+    fn tungstenite_error_maps_to_ws_string() {
+        let err: EtherealRuntimeError =
+            tokio_tungstenite::tungstenite::Error::ConnectionClosed.into();
 
         match err {
-            EtherealRuntimeError::Connection(message) => {
-                assert!(message.contains("websocket send failed"));
+            EtherealRuntimeError::WS(message) => {
+                assert!(message.to_lowercase().contains("closed"));
             }
             other => panic!("unexpected error variant: {other:?}"),
         }

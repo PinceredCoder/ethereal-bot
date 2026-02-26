@@ -105,18 +105,6 @@ pub struct CancelOrderRequest {
     pub signature: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum SubmitOrderResult {
-    Accepted { payload: serde_json::Value },
-    Rejected { payload: serde_json::Value },
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub enum CancelOrderResult {
-    Accepted { payload: serde_json::Value },
-    Rejected { payload: serde_json::Value },
-}
-
 #[derive(Debug, Clone, PartialEq, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OrderUpdateData {

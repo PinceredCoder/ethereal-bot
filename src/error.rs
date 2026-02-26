@@ -3,30 +3,21 @@ pub enum EtherealRuntimeError {
     #[error("invalid url: {0}")]
     InvalidUrl(#[from] url::ParseError),
 
-    #[error(transparent)]
-    WS(#[from] tokio_tungstenite::tungstenite::Error),
-
-    #[error("failed connecting to the exchange: {0}")]
-    Connection(String),
+    #[error("websocket error: {0}")]
+    WS(String),
 
     #[error("invalid address: {0}")]
     InvalidHexAddress(#[from] alloy::hex::FromHexError),
 
-    #[error("request was not sent to exchange: {0}")]
-    RequestNotSent(#[source] reqwest::Error),
-
-    #[error("request delivery is uncertain and may have reached exchange: {0}")]
-    RequestDeliveryUncertain(#[source] reqwest::Error),
-
-    #[error(transparent)]
-    HttpError(#[from] reqwest::Error),
-
     #[error("execution mode `{0}` is not implemented yet")]
     ExecutionModeNotImplemented(&'static str),
 
-    #[error("order was rejected by exchange: {0}")]
-    OrderRejected(String),
+    #[error(transparent)]
+    Executor(#[from] crate::ExecutorError),
+}
 
-    #[error("cancel request was rejected by exchange: {0}")]
-    CancelRejected(String),
+impl From<tokio_tungstenite::tungstenite::Error> for EtherealRuntimeError {
+    fn from(err: tokio_tungstenite::tungstenite::Error) -> Self {
+        Self::WS(err.to_string())
+    }
 }

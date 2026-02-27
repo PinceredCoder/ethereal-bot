@@ -1,5 +1,4 @@
 use super::{ExecutorError, OrderExecutor};
-use crate::logging::targets;
 use crate::models::dto::{CancelOrderRequest, OrderRequest};
 
 pub(crate) struct PaperExecutor {
@@ -41,13 +40,6 @@ impl OrderExecutor for PaperExecutor {
 
         if !status.is_success() {
             let body = response.text().await?;
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order/dry-run",
-                status = %status,
-                payload = %body,
-                "paper submit rejected"
-            );
             return Err(ExecutorError::Rejected {
                 status: status.as_u16(),
                 payload: body,
@@ -57,21 +49,8 @@ impl OrderExecutor for PaperExecutor {
         let payload: serde_json::Value = response.json().await?;
 
         if is_submit_created(&payload) {
-            tracing::info!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order/dry-run",
-                status = %status,
-                "paper submit accepted"
-            );
             Ok(payload)
         } else {
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order/dry-run",
-                status = %status,
-                payload = %payload,
-                "paper submit rejected"
-            );
             Err(ExecutorError::Rejected {
                 status: status.as_u16(),
                 payload: payload.to_string(),
@@ -89,11 +68,6 @@ impl OrderExecutor for PaperExecutor {
                 "message": "cancel is not supported for paper executor yet"
             }]
         });
-
-        tracing::warn!(
-            target: targets::RUNTIME_EXEC,
-            "paper cancel requested but unsupported"
-        );
 
         Err(ExecutorError::Rejected {
             status: 422,

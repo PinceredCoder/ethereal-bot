@@ -101,7 +101,7 @@ impl EtherealRuntime {
 
         tracing::info!(
             target: targets::RUNTIME_WS,
-            ws_url = %ws_url,
+            %ws_url,
             "connecting websocket"
         );
 
@@ -136,35 +136,12 @@ impl EtherealRuntime {
         mut ws_receiver: tokio::sync::mpsc::Receiver<tokio_tungstenite::tungstenite::Message>,
     ) {
         while let Some(msg) = ws_receiver.recv().await {
-            let mut attempts = 0u32;
-            loop {
-                match ws_write.send(msg.clone()).await {
-                    Ok(_) => break,
-                    Err(err) => {
-                        attempts += 1;
-                        if attempts >= 3 {
-                            tracing::error!(
-                                target: targets::RUNTIME_WS,
-                                attempts,
-                                error = %err,
-                                "websocket write failed after retries"
-                            );
-                            break;
-                        }
-
-                        tracing::warn!(
-                            target: targets::RUNTIME_WS,
-                            attempts,
-                            error = %err,
-                            "websocket write failed; retrying"
-                        );
-
-                        tokio::time::sleep(std::time::Duration::from_millis(
-                            100 * 2u64.pow(attempts),
-                        ))
-                        .await;
-                    }
-                }
+            if let Err(error) = ws_write.send(msg).await {
+                tracing::error!(
+                    target: targets::RUNTIME_WS,
+                    %error,
+                    "websocket write failed"
+                );
             }
         }
     }
@@ -180,10 +157,10 @@ impl EtherealRuntime {
             match ws_read.next().await {
                 Some(Ok(Message::Text(text))) => {
                     if text == "2" {
-                        if let Err(err) = ws_sender.send(Message::Text("3".into())).await {
+                        if let Err(error) = ws_sender.send(Message::Text("3".into())).await {
                             tracing::warn!(
                                 target: targets::RUNTIME_WS,
-                                error = %err,
+                                %error,
                                 "failed to enqueue websocket pong"
                             );
                         }
@@ -210,7 +187,7 @@ impl EtherealRuntime {
                                 tracing::debug!(
                                     target: targets::RUNTIME_WS,
                                     event,
-                                    payload = %payload,
+                                    %payload,
                                     "received unknown websocket event"
                                 );
                             }
@@ -218,8 +195,12 @@ impl EtherealRuntime {
                     }
                 }
                 Some(Ok(_)) => continue,
-                Some(Err(err)) => {
-                    tracing::error!(target: targets::RUNTIME_WS, error = %err, "websocket read error");
+                Some(Err(error)) => {
+                    tracing::error!(
+                        target: targets::RUNTIME_WS,
+                        %error,
+                        "websocket read error"
+                    );
                     break;
                 }
                 None => break,
@@ -264,7 +245,7 @@ impl EtherealRuntime {
 
         tracing::info!(
             target: targets::RUNTIME_WS,
-            product_id = %product_id,
+            %product_id,
             "subscribed to market price"
         );
 
@@ -302,7 +283,7 @@ impl EtherealRuntime {
 
         tracing::info!(
             target: targets::RUNTIME_EXEC,
-            client_order_id = %client_order_id,
+            %client_order_id,
             product_id,
             side,
             "submitting order"
@@ -313,22 +294,23 @@ impl EtherealRuntime {
             signature: format!("0x{}", hex::encode(signature.as_bytes())),
         };
 
-        let _payload = match self.order_executor.submit_order(&order).await {
+        let payload = match self.order_executor.submit_order(&order).await {
             Ok(value) => value,
-            Err(err) => {
+            Err(error) => {
                 tracing::warn!(
                     target: targets::RUNTIME_EXEC,
-                    client_order_id = %client_order_id,
-                    error = %err,
+                    %client_order_id,
+                    %error,
                     "order submission failed"
                 );
-                return Err(err.into());
+                return Err(error.into());
             }
         };
 
         tracing::info!(
             target: targets::RUNTIME_EXEC,
-            client_order_id = %client_order_id,
+            %client_order_id,
+            %payload,
             "order accepted"
         );
 
@@ -346,14 +328,14 @@ impl EtherealRuntime {
 
         tracing::info!(
             target: targets::RUNTIME_EXEC,
-            client_order_id = %client_order_id,
+            %client_order_id,
             "submitting cancel"
         );
 
         self.order_executor.cancel_order(&cancel_req).await?;
         tracing::info!(
             target: targets::RUNTIME_EXEC,
-            client_order_id = %client_order_id,
+            %client_order_id,
             "cancel accepted"
         );
         Ok(())

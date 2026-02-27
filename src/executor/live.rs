@@ -1,5 +1,4 @@
 use super::{ExecutorError, OrderExecutor, is_cancel_accepted};
-use crate::logging::targets;
 use crate::models::dto::{CancelOrderRequest, OrderRequest};
 
 pub(crate) struct LiveExecutor {
@@ -37,13 +36,6 @@ impl OrderExecutor for LiveExecutor {
 
         if !status.is_success() {
             let body = response.text().await?;
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order",
-                status = %status,
-                payload = %body,
-                "live submit rejected"
-            );
             return Err(ExecutorError::Rejected {
                 status: status.as_u16(),
                 payload: body,
@@ -53,21 +45,8 @@ impl OrderExecutor for LiveExecutor {
         let payload: serde_json::Value = response.json().await?;
 
         if is_submit_created(&payload) {
-            tracing::info!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order",
-                status = %status,
-                "live submit accepted"
-            );
             Ok(payload)
         } else {
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order",
-                status = %status,
-                payload = %payload,
-                "live submit rejected"
-            );
             Err(ExecutorError::Rejected {
                 status: status.as_u16(),
                 payload: payload.to_string(),
@@ -89,13 +68,6 @@ impl OrderExecutor for LiveExecutor {
 
         if !status.is_success() {
             let body = response.text().await?;
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order/cancel",
-                status = %status,
-                payload = %body,
-                "live cancel rejected"
-            );
             return Err(ExecutorError::Rejected {
                 status: status.as_u16(),
                 payload: body,
@@ -105,21 +77,8 @@ impl OrderExecutor for LiveExecutor {
         let payload: serde_json::Value = response.json().await?;
 
         if is_cancel_accepted(&payload) {
-            tracing::info!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order/cancel",
-                status = %status,
-                "live cancel accepted"
-            );
             Ok(payload)
         } else {
-            tracing::warn!(
-                target: targets::RUNTIME_EXEC,
-                endpoint = "/v1/order/cancel",
-                status = %status,
-                payload = %payload,
-                "live cancel rejected"
-            );
             Err(ExecutorError::Rejected {
                 status: status.as_u16(),
                 payload: payload.to_string(),

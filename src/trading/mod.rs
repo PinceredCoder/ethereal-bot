@@ -48,11 +48,11 @@ pub async fn run_strategy_loop(
         }
 
         if let Some(tick) = latest_market_tick
-            && let Err(err) = handle_market_tick(runtime, config, &mut state, &tick).await
+            && let Err(error) = handle_market_tick(runtime, config, &mut state, &tick).await
         {
             tracing::warn!(
                 target: targets::TRADING_DECISION,
-                error = %err,
+                %error,
                 "strategy tick processing failed"
             );
         }
@@ -129,7 +129,7 @@ async fn execute_action(
     let Some(action) = action else {
         tracing::debug!(
             target: targets::TRADING_DECISION,
-            side = %side,
+            %side,
             "strategy action: skip"
         );
         return Ok(());
@@ -182,8 +182,8 @@ async fn place_side_order(
 
     tracing::info!(
         target: targets::TRADING_DECISION,
-        side = %side,
-        client_order_id = %client_order_id,
+        %side,
+        %client_order_id,
         price_raw,
         qty_raw,
         "strategy action: place (optimistic completion)"
@@ -209,8 +209,8 @@ async fn cancel_side_order(
 
     tracing::info!(
         target: targets::TRADING_DECISION,
-        side = %side,
-        client_order_id = %client_order_id,
+        %side,
+        %client_order_id,
         "strategy action: cancel (optimistic completion)"
     );
 
